@@ -9,6 +9,10 @@ import { RefreshCw } from 'lucide-react';
 const AdminRoute = () => {
   const { isAuthenticated, isAdmin, isInitialized, initError, retryInit } = useAuth();
   
+  console.log('AdminRoute - isAuthenticated:', isAuthenticated); // Added debug log
+  console.log('AdminRoute - isAdmin:', isAdmin); // Added debug log
+  console.log('AdminRoute - isInitialized:', isInitialized); // Added debug log
+  
   if (!isInitialized) {
     return <LoadingSpinner fullScreen message="Checking authentication status..." />;
   }

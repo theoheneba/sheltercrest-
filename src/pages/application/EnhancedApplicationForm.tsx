@@ -15,8 +15,8 @@ import PaymentModal from '../../components/payment/PaymentModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { paymentService } from '../../services/paymentService';
 import PaymentSummary from '../../components/payment/PaymentSummary';
-import { ApplicationFormData } from '../../types/application';
-import { supabase } from '../../services/db';
+import { ApplicationFormData, EmergencyContact, EmployerInformation } from '../../types/application';
+import { RefreshCw, AlertCircle } from 'lucide-react';
 
 const EnhancedApplicationForm = () => {
   const navigate = useNavigate();
@@ -26,7 +26,8 @@ const EnhancedApplicationForm = () => {
     createApplication, 
     applications, 
     fetchApplications, 
-    loading,
+    loading, 
+    error,
     createEmergencyContact,
     createEmployerInfo
   } = useUserStore();
@@ -34,176 +35,115 @@ const EnhancedApplicationForm = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'document_review' | 'deposit_interest'>('document_review');
   const [applicationId, setApplicationId] = useState<string | null>(null);
-  const [currentStep, setCurrentStep] = useState(1);
-  const totalSteps = 4;
+  const [retryCount, setRetryCount] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
   
-  const [formData, setFormData] = useState<ApplicationFormData>({
-    personalInfo: {
-      firstName: '',
-      lastName: '',
-      gender: 'male',
-      dateOfBirth: '',
-      maritalStatus: 'single',
-      educationLevel: '',
-      whatsappNumber: '',
-      email: '',
-      currentResidence: '',
-      heardFrom: ''
-    },
-    emergencyContact: {
-      firstName: '',
-      lastName: '',
-      whatsappNumber: '',
-      residenceAddress: ''
-    },
-    employmentInfo: {
-      status: 'full-time',
-      type: '',
-      contractEndDate: '',
-      contractRenewable: false,
-      hasOutstandingLoans: false,
-      loanRepaymentAmount: 0,
-      monthlyIncome: 0,
-      employmentStartDate: '',
-      employeeIdNumber: '',
-      mandateNumber: '',
-      mandatePin: '',
-      hasSavingsAccount: false,
-      savingsAmount: 0
-    },
-    employerInfo: {
-      companyName: '',
-      companyWebsite: '',
-      companyLocation: '',
-      companyLocationGps: '',
-      companyPhone: '',
-      supervisorName: '',
-      supervisorPhone: ''
-    },
-    documents: {},
-    monthlyRent: 0,
-    depositAmount: 0,
+  const [formData, setFormData] = useState({
+    monthlyRent: '',
+    depositAmount: '',
+    serviceFee: '',
+    visitFee: '',
+    processingFee: '',
+    totalInitialPayment: '',
     landlordName: '',
     landlordPhone: '',
     propertyAddress: '',
     leaseStartDate: '',
     leaseEndDate: '',
     landlordPaymentDate: '',
-    paymentTerm: '12'
+    paymentTerm: '12',
+    // Emergency contact
+    emergencyFirstName: '',
+    emergencyLastName: '',
+    emergencyWhatsappNumber: '',
+    emergencyResidenceAddress: '',
+    // Employer information
+    companyName: '',
+    companyWebsite: '',
+    companyLocation: '',
+    companyLocationGps: '',
+    companyPhone: '',
+    supervisorName: '',
+    supervisorPhone: '',
+    // Employment details
+    employeeIdNumber: '',
+    mandateNumber: '',
+    mandatePin: '',
+    hasOutstandingLoans: false,
+    loanRepaymentAmount: '',
+    hasSavingsAccount: false,
+    savingsAmount: '',
+    contractEndDate: '',
+    contractRenewable: false
   });
 
   useEffect(() => {
-    fetchApplications();
+    fetchApplications().catch(err => {
+      console.error('Error fetching applications:', err);
+      toast.error('Failed to load application data. Please try again.');
+    });
   }, [fetchApplications]);
 
   useEffect(() => {
     // If user already has an application, populate the form with that data
     if (applications.length > 0) {
       const latestApplication = applications[0];
-      
-      // Populate personal info from user profile
-      if (user) {
-        setFormData(prev => ({
-          ...prev,
-          personalInfo: {
-            ...prev.personalInfo,
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            email: user.email || ''
-          }
-        }));
-        
-        // Fetch additional profile data
-        supabase
-          .from('profiles')
-          .select('gender, date_of_birth, marital_status, education_level, whatsapp_number, address, heard_from')
-          .eq('id', user.id)
-          .single()
-          .then(({ data, error }) => {
-            if (!error && data) {
-              setFormData(prev => ({
-                ...prev,
-                personalInfo: {
-                  ...prev.personalInfo,
-                  gender: data.gender as any || 'male',
-                  dateOfBirth: data.date_of_birth || '',
-                  maritalStatus: data.marital_status as any || 'single',
-                  educationLevel: data.education_level || '',
-                  whatsappNumber: data.whatsapp_number || '',
-                  currentResidence: data.address || '',
-                  heardFrom: data.heard_from || ''
-                }
-              }));
-            }
-          });
-      }
-      
-      // Populate application data
       setFormData(prev => ({
         ...prev,
-        monthlyRent: latestApplication.monthly_rent,
-        depositAmount: latestApplication.deposit_amount,
-        landlordName: latestApplication.landlord_name,
-        landlordPhone: latestApplication.landlord_phone,
-        propertyAddress: latestApplication.property_address,
-        leaseStartDate: latestApplication.lease_start_date,
-        leaseEndDate: latestApplication.lease_end_date,
+        monthlyRent: latestApplication.monthly_rent?.toString() || '',
+        depositAmount: latestApplication.deposit_amount?.toString() || '',
+        serviceFee: latestApplication.service_fee?.toString() || '',
+        visitFee: latestApplication.visit_fee?.toString() || '',
+        processingFee: latestApplication.processing_fee?.toString() || '',
+        totalInitialPayment: latestApplication.total_initial_payment?.toString() || '',
+        landlordName: latestApplication.landlord_name || '',
+        landlordPhone: latestApplication.landlord_phone || '',
+        propertyAddress: latestApplication.property_address || '',
+        leaseStartDate: latestApplication.lease_start_date || '',
+        leaseEndDate: latestApplication.lease_end_date || '',
         landlordPaymentDate: latestApplication.landlord_payment_date || '',
-        paymentTerm: latestApplication.payment_term?.toString() || '12'
-      }));
-      
-      // Populate employment info
-      setFormData(prev => ({
-        ...prev,
-        employmentInfo: {
-          ...prev.employmentInfo,
-          status: 'full-time',
-          contractEndDate: latestApplication.contract_end_date || '',
-          contractRenewable: latestApplication.contract_renewable || false,
-          hasOutstandingLoans: latestApplication.has_outstanding_loans || false,
-          loanRepaymentAmount: latestApplication.loan_repayment_amount || 0,
-          hasSavingsAccount: latestApplication.has_savings_account || false,
-          savingsAmount: latestApplication.savings_amount || 0,
-          employeeIdNumber: latestApplication.employee_id_number || '',
-          mandateNumber: latestApplication.mandate_number || '',
-          mandatePin: latestApplication.mandate_pin || ''
-        }
+        paymentTerm: latestApplication.payment_term?.toString() || '12',
+        employeeIdNumber: latestApplication.employee_id_number || '',
+        mandateNumber: latestApplication.mandate_number || '',
+        mandatePin: latestApplication.mandate_pin || '',
+        hasOutstandingLoans: latestApplication.has_outstanding_loans || false,
+        loanRepaymentAmount: latestApplication.loan_repayment_amount?.toString() || '',
+        hasSavingsAccount: latestApplication.has_savings_account || false,
+        savingsAmount: latestApplication.savings_amount?.toString() || '',
+        contractEndDate: latestApplication.contract_end_date || '',
+        contractRenewable: latestApplication.contract_renewable || false
       }));
       
       setApplicationId(latestApplication.id);
       
-      // Fetch emergency contact if exists
+      // If there's emergency contact data, populate it
       if (latestApplication.emergency_contacts && latestApplication.emergency_contacts.length > 0) {
         const emergencyContact = latestApplication.emergency_contacts[0];
         setFormData(prev => ({
           ...prev,
-          emergencyContact: {
-            firstName: emergencyContact.first_name,
-            lastName: emergencyContact.last_name,
-            whatsappNumber: emergencyContact.whatsapp_number,
-            residenceAddress: emergencyContact.residence_address
-          }
+          emergencyFirstName: emergencyContact.first_name || '',
+          emergencyLastName: emergencyContact.last_name || '',
+          emergencyWhatsappNumber: emergencyContact.whatsapp_number || '',
+          emergencyResidenceAddress: emergencyContact.residence_address || ''
         }));
       }
       
-      // Fetch employer info if exists
+      // If there's employer information data, populate it
       if (latestApplication.employer_information && latestApplication.employer_information.length > 0) {
         const employerInfo = latestApplication.employer_information[0];
         setFormData(prev => ({
           ...prev,
-          employerInfo: {
-            companyName: employerInfo.company_name,
-            companyWebsite: employerInfo.company_website || '',
-            companyLocation: employerInfo.company_location,
-            companyLocationGps: employerInfo.company_location_gps || '',
-            companyPhone: employerInfo.company_phone,
-            supervisorName: employerInfo.supervisor_name,
-            supervisorPhone: employerInfo.supervisor_phone
-          }
+          companyName: employerInfo.company_name || '',
+          companyWebsite: employerInfo.company_website || '',
+          companyLocation: employerInfo.company_location || '',
+          companyLocationGps: employerInfo.company_location_gps || '',
+          companyPhone: employerInfo.company_phone || '',
+          supervisorName: employerInfo.supervisor_name || '',
+          supervisorPhone: employerInfo.supervisor_phone || ''
         }));
       }
     }
-  }, [applications, user]);
+  }, [applications]);
 
   useEffect(() => {
     if (!isLoading && !isEligible) {
@@ -219,10 +159,7 @@ const EnhancedApplicationForm = () => {
     return null; // Component will redirect in useEffect
   }
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
-    section: keyof ApplicationFormData
-  ) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target;
     
     // Handle checkbox inputs
@@ -230,111 +167,66 @@ const EnhancedApplicationForm = () => {
       const checked = (e.target as HTMLInputElement).checked;
       setFormData(prev => ({
         ...prev,
-        [section]: {
-          ...prev[section],
-          [name]: checked
-        }
+        [name]: checked
       }));
       return;
     }
     
-    // Handle all other inputs
     setFormData(prev => ({
       ...prev,
-      [section]: {
-        ...prev[section],
-        [name]: value
-      }
+      [name]: value
     }));
     
     // Calculate all fees when monthly rent changes
-    if (section === 'monthlyRent' && value) {
+    if (name === 'monthlyRent' && value) {
       const monthlyRent = parseFloat(value);
       const paymentTerm = parseInt(formData.paymentTerm);
       const { initialPaymentRequired, serviceFee, propertyInspectionFee, documentUploadFee, total } = calculateInitialPayment(monthlyRent, paymentTerm);
       setFormData(prev => ({
         ...prev,
-        depositAmount: initialPaymentRequired,
-        serviceFee,
-        visitFee: propertyInspectionFee,
-        processingFee: documentUploadFee,
-        totalInitialPayment: total
+        [name]: value,
+        depositAmount: initialPaymentRequired.toString(),
+        serviceFee: serviceFee.toString(),
+        visitFee: propertyInspectionFee.toString(),
+        processingFee: documentUploadFee.toString(),
+        totalInitialPayment: total.toString()
       }));
     }
     
     // Recalculate when payment term changes
     if (name === 'paymentTerm' && formData.monthlyRent) {
-      const monthlyRent = formData.monthlyRent;
+      const monthlyRent = parseFloat(formData.monthlyRent);
       const paymentTerm = parseInt(value);
       const { initialPaymentRequired, serviceFee, propertyInspectionFee, documentUploadFee, total } = calculateInitialPayment(monthlyRent, paymentTerm);
       setFormData(prev => ({
         ...prev,
-        depositAmount: initialPaymentRequired,
-        serviceFee,
-        visitFee: propertyInspectionFee,
-        processingFee: documentUploadFee,
-        totalInitialPayment: total
+        [name]: value,
+        depositAmount: initialPaymentRequired.toString(),
+        serviceFee: serviceFee.toString(),
+        visitFee: propertyInspectionFee.toString(),
+        processingFee: documentUploadFee.toString(),
+        totalInitialPayment: total.toString()
       }));
     }
   };
 
-  const nextStep = () => {
-    setCurrentStep(prev => Math.min(prev + 1, totalSteps));
-  };
-
-  const prevStep = () => {
-    setCurrentStep(prev => Math.max(prev - 1, 1));
-  };
-
-  const validateCurrentStep = () => {
-    switch (currentStep) {
-      case 1: // Personal Information
-        if (!formData.personalInfo.firstName || !formData.personalInfo.lastName || 
-            !formData.personalInfo.email || !formData.personalInfo.whatsappNumber ||
-            !formData.personalInfo.dateOfBirth || !formData.personalInfo.currentResidence) {
-          toast.error('Please fill in all required personal information fields');
-          return false;
-        }
-        break;
-      case 2: // Emergency Contact
-        if (!formData.emergencyContact.firstName || !formData.emergencyContact.lastName || 
-            !formData.emergencyContact.whatsappNumber || !formData.emergencyContact.residenceAddress) {
-          toast.error('Please fill in all emergency contact fields');
-          return false;
-        }
-        break;
-      case 3: // Employment Information
-        if (!formData.employmentInfo.monthlyIncome || !formData.employmentInfo.employmentStartDate ||
-            !formData.employerInfo.companyName || !formData.employerInfo.companyLocation ||
-            !formData.employerInfo.companyPhone || !formData.employerInfo.supervisorName ||
-            !formData.employerInfo.supervisorPhone) {
-          toast.error('Please fill in all required employment information fields');
-          return false;
-        }
-        break;
-      case 4: // Rental Information
-        if (!formData.monthlyRent || !formData.landlordName || !formData.landlordPhone ||
-            !formData.propertyAddress || !formData.leaseStartDate || !formData.leaseEndDate ||
-            !formData.landlordPaymentDate) {
-          toast.error('Please fill in all required rental information fields');
-          return false;
-        }
-        break;
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    setRetryCount(prev => prev + 1);
+    
+    try {
+      await fetchApplications();
+      toast.success('Connection restored successfully');
+    } catch (error) {
+      console.error('Retry failed:', error);
+      toast.error('Failed to reconnect. Please try again later.');
+    } finally {
+      setIsRetrying(false);
     }
-    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!validateCurrentStep()) {
-      return;
-    }
-    
-    if (currentStep < totalSteps) {
-      nextStep();
-      return;
-    }
     
     try {
       // Validate required fields
@@ -346,7 +238,16 @@ const EnhancedApplicationForm = () => {
         'leaseStartDate',
         'leaseEndDate',
         'landlordPaymentDate',
-        'paymentTerm'
+        'paymentTerm',
+        'emergencyFirstName',
+        'emergencyLastName',
+        'emergencyWhatsappNumber',
+        'emergencyResidenceAddress',
+        'companyName',
+        'companyLocation',
+        'companyPhone',
+        'supervisorName',
+        'supervisorPhone'
       ];
 
       const missingFields = requiredFields.filter(field => !formData[field as keyof typeof formData]);
@@ -357,7 +258,7 @@ const EnhancedApplicationForm = () => {
       }
 
       // Calculate document review fee
-      const monthlyRent = formData.monthlyRent;
+      const monthlyRent = parseFloat(formData.monthlyRent);
       const paymentTerm = parseInt(formData.paymentTerm);
       const documentReviewFee = calculateDocumentReviewFee(monthlyRent);
       
@@ -372,7 +273,7 @@ const EnhancedApplicationForm = () => {
 
   const handlePaymentSuccess = async (reference: string) => {
     try {
-      const monthlyRent = formData.monthlyRent;
+      const monthlyRent = parseFloat(formData.monthlyRent);
       const paymentTerm = parseInt(formData.paymentTerm);
       
       if (paymentStep === 'document_review') {
@@ -384,14 +285,14 @@ const EnhancedApplicationForm = () => {
         });
         
         // Create application in pending status
-        const response = await createApplication({
+        const applicationData = {
           monthly_rent: monthlyRent,
-          deposit_amount: formData.depositAmount,
+          deposit_amount: parseFloat(formData.depositAmount),
           interest_amount: monthlyRent * 0.2808 * paymentTerm, // Calculate interest
-          service_fee: calculateInitialPayment(monthlyRent, paymentTerm).serviceFee,
-          visit_fee: calculateInitialPayment(monthlyRent, paymentTerm).propertyInspectionFee,
-          processing_fee: calculateInitialPayment(monthlyRent, paymentTerm).documentUploadFee,
-          total_initial_payment: calculateInitialPayment(monthlyRent, paymentTerm).total,
+          service_fee: parseFloat(formData.serviceFee),
+          visit_fee: parseFloat(formData.visitFee),
+          processing_fee: parseFloat(formData.processingFee),
+          total_initial_payment: parseFloat(formData.totalInitialPayment),
           landlord_name: formData.landlordName,
           landlord_phone: formData.landlordPhone,
           property_address: formData.propertyAddress,
@@ -402,59 +303,58 @@ const EnhancedApplicationForm = () => {
           prorated_rent: 0, // Will be calculated after approval
           status: 'pending',
           // Additional fields
-          contract_end_date: formData.employmentInfo.contractEndDate,
-          contract_renewable: formData.employmentInfo.contractRenewable,
-          has_outstanding_loans: formData.employmentInfo.hasOutstandingLoans,
-          loan_repayment_amount: formData.employmentInfo.loanRepaymentAmount,
-          has_savings_account: formData.employmentInfo.hasSavingsAccount,
-          savings_amount: formData.employmentInfo.savingsAmount,
-          employee_id_number: formData.employmentInfo.employeeIdNumber,
-          mandate_number: formData.employmentInfo.mandateNumber,
-          mandate_pin: formData.employmentInfo.mandatePin
-        });
+          employee_id_number: formData.employeeIdNumber,
+          mandate_number: formData.mandateNumber,
+          mandate_pin: formData.mandatePin,
+          has_outstanding_loans: formData.hasOutstandingLoans,
+          loan_repayment_amount: formData.loanRepaymentAmount ? parseFloat(formData.loanRepaymentAmount) : null,
+          has_savings_account: formData.hasSavingsAccount,
+          savings_amount: formData.savingsAmount ? parseFloat(formData.savingsAmount) : null,
+          contract_end_date: formData.contractEndDate || null,
+          contract_renewable: formData.contractRenewable
+        };
         
+        // Create the application
+        const response = await createApplication(applicationData);
         setApplicationId(response.id);
         
         // Create emergency contact
+        const emergencyContactData: EmergencyContact = {
+          firstName: formData.emergencyFirstName,
+          lastName: formData.emergencyLastName,
+          whatsappNumber: formData.emergencyWhatsappNumber,
+          residenceAddress: formData.emergencyResidenceAddress
+        };
+        
         await createEmergencyContact({
           application_id: response.id,
-          first_name: formData.emergencyContact.firstName,
-          last_name: formData.emergencyContact.lastName,
-          whatsapp_number: formData.emergencyContact.whatsappNumber,
-          residence_address: formData.emergencyContact.residenceAddress
+          first_name: emergencyContactData.firstName,
+          last_name: emergencyContactData.lastName,
+          whatsapp_number: emergencyContactData.whatsappNumber,
+          residence_address: emergencyContactData.residenceAddress
         });
         
         // Create employer information
+        const employerInfoData: EmployerInformation = {
+          companyName: formData.companyName,
+          companyWebsite: formData.companyWebsite,
+          companyLocation: formData.companyLocation,
+          companyLocationGps: formData.companyLocationGps,
+          companyPhone: formData.companyPhone,
+          supervisorName: formData.supervisorName,
+          supervisorPhone: formData.supervisorPhone
+        };
+        
         await createEmployerInfo({
           application_id: response.id,
-          company_name: formData.employerInfo.companyName,
-          company_website: formData.employerInfo.companyWebsite,
-          company_location: formData.employerInfo.companyLocation,
-          company_location_gps: formData.employerInfo.companyLocationGps,
-          company_phone: formData.employerInfo.companyPhone,
-          supervisor_name: formData.employerInfo.supervisorName,
-          supervisor_phone: formData.employerInfo.supervisorPhone
+          company_name: employerInfoData.companyName,
+          company_website: employerInfoData.companyWebsite,
+          company_location: employerInfoData.companyLocation,
+          company_location_gps: employerInfoData.companyLocationGps,
+          company_phone: employerInfoData.companyPhone,
+          supervisor_name: employerInfoData.supervisorName,
+          supervisor_phone: employerInfoData.supervisorPhone
         });
-        
-        // Update user profile with additional information
-        if (user) {
-          await supabase
-            .from('profiles')
-            .update({
-              gender: formData.personalInfo.gender,
-              date_of_birth: formData.personalInfo.dateOfBirth,
-              marital_status: formData.personalInfo.maritalStatus,
-              education_level: formData.personalInfo.educationLevel,
-              whatsapp_number: formData.personalInfo.whatsappNumber,
-              address: formData.personalInfo.currentResidence,
-              heard_from: formData.personalInfo.heardFrom,
-              employment_status: formData.employmentInfo.status,
-              employer_name: formData.employerInfo.companyName,
-              employment_start_date: formData.employmentInfo.employmentStartDate,
-              monthly_income: formData.employmentInfo.monthlyIncome
-            })
-            .eq('id', user.id);
-        }
         
         toast.success('Document upload fee paid successfully. Your application is now pending review.');
         navigate('/dashboard');
@@ -504,7 +404,7 @@ const EnhancedApplicationForm = () => {
     }
   };
 
-  const monthlyRent = formData.monthlyRent;
+  const monthlyRent = formData.monthlyRent ? parseFloat(formData.monthlyRent) : 0;
   const paymentTerm = parseInt(formData.paymentTerm || '12');
   const initialPayment = calculateInitialPayment(monthlyRent, paymentTerm);
   const documentReviewFee = calculateDocumentReviewFee(monthlyRent);
@@ -529,365 +429,383 @@ const EnhancedApplicationForm = () => {
     }
   }
 
-  const renderStepContent = () => {
-    switch (currentStep) {
-      case 1:
-        return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Personal Information</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="firstName" className="block text-sm font-medium text-gray-700 mb-1">
-                  First Name*
-                </label>
-                <input
-                  type="text"
-                  id="firstName"
-                  name="firstName"
-                  value={formData.personalInfo.firstName}
-                  onChange={(e) => handleInputChange(e, 'personalInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="lastName" className="block text-sm font-medium text-gray-700 mb-1">
-                  Last Name*
-                </label>
-                <input
-                  type="text"
-                  id="lastName"
-                  name="lastName"
-                  value={formData.personalInfo.lastName}
-                  onChange={(e) => handleInputChange(e, 'personalInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="gender" className="block text-sm font-medium text-gray-700 mb-1">
-                  Gender*
-                </label>
-                <select
-                  id="gender"
-                  name="gender"
-                  value={formData.personalInfo.gender}
-                  onChange={(e) => handleInputChange(e, 'personalInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                >
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              
-              <div>
-                <label htmlFor="dateOfBirth" className="block text-sm font-medium text-gray-700 mb-1">
-                  Date of Birth*
-                </label>
-                <input
-                  type="date"
-                  id="dateOfBirth"
-                  name="dateOfBirth"
-                  value={formData.personalInfo.dateOfBirth}
-                  onChange={(e) => handleInputChange(e, 'personalInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="maritalStatus" className="block text-sm font-medium text-gray-700 mb-1">
-                  Marital Status*
-                </label>
-                <select
-                  id="maritalStatus"
-                  name="maritalStatus"
-                  value={formData.personalInfo.maritalStatus}
-                  onChange={(e) => handleInputChange(e, 'personalInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                >
-                  <option value="single">Single</option>
-                  <option value="married">Married</option>
-                  <option value="divorced">Divorced</option>
-                  <option value="widowed">Widowed</option>
-                </select>
-              </div>
-              
-              <div>
-                <label htmlFor="educationLevel" className="block text-sm font-medium text-gray-700 mb-1">
-                  Education Level*
-                </label>
-                <select
-                  id="educationLevel"
-                  name="educationLevel"
-                  value={formData.personalInfo.educationLevel}
-                  onChange={(e) => handleInputChange(e, 'personalInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                >
-                  <option value="">Select education level</option>
-                  <option value="primary">Primary</option>
-                  <option value="secondary">Secondary</option>
-                  <option value="diploma">Diploma</option>
-                  <option value="bachelor">Bachelor's Degree</option>
-                  <option value="master">Master's Degree</option>
-                  <option value="phd">PhD</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                  Email*
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  value={formData.personalInfo.email}
-                  onChange={(e) => handleInputChange(e, 'personalInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                  disabled={!!user?.email}
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="whatsappNumber" className="block text-sm font-medium text-gray-700 mb-1">
-                  WhatsApp Number*
-                </label>
-                <input
-                  type="tel"
-                  id="whatsappNumber"
-                  name="whatsappNumber"
-                  value={formData.personalInfo.whatsappNumber}
-                  onChange={(e) => handleInputChange(e, 'personalInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                  placeholder="e.g., 0244123456"
-                />
-              </div>
-            </div>
-            
-            <div>
-              <label htmlFor="currentResidence" className="block text-sm font-medium text-gray-700 mb-1">
-                Current Residence Address*
-              </label>
-              <input
-                type="text"
-                id="currentResidence"
-                name="currentResidence"
-                value={formData.personalInfo.currentResidence}
-                onChange={(e) => handleInputChange(e, 'personalInfo')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                required
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="heardFrom" className="block text-sm font-medium text-gray-700 mb-1">
-                How did you hear about us?
-              </label>
-              <select
-                id="heardFrom"
-                name="heardFrom"
-                value={formData.personalInfo.heardFrom}
-                onChange={(e) => handleInputChange(e, 'personalInfo')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+  // Show error state if there's an error
+  if (error && !isRetrying) {
+    return (
+      <div className="max-w-4xl mx-auto space-y-6">
+        <Card>
+          <div className="p-6">
+            <div className="flex items-center justify-center flex-col">
+              <AlertCircle size={48} className="text-red-500 mb-4" />
+              <h2 className="text-xl font-semibold text-red-700 mb-2">Connection Error</h2>
+              <p className="text-gray-600 mb-6 text-center">
+                {error}
+              </p>
+              <Button 
+                onClick={handleRetry}
+                leftIcon={<RefreshCw size={18} />}
+                isLoading={isRetrying}
               >
-                <option value="">Select an option</option>
-                <option value="social_media">Social Media</option>
-                <option value="friend">Friend or Family</option>
-                <option value="search_engine">Search Engine</option>
-                <option value="advertisement">Advertisement</option>
-                <option value="other">Other</option>
-              </select>
+                Retry Connection
+              </Button>
             </div>
           </div>
-        );
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      <h1 className="text-2xl font-bold text-gray-900">Rent Assistance Application</h1>
       
-      case 2:
-        return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Emergency Contact</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Please provide details of someone we can contact in case of an emergency.
-            </p>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="ecFirstName" className="block text-sm font-medium text-gray-700 mb-1">
-                  First Name*
-                </label>
-                <input
-                  type="text"
-                  id="ecFirstName"
-                  name="firstName"
-                  value={formData.emergencyContact.firstName}
-                  onChange={(e) => handleInputChange(e, 'emergencyContact')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="ecLastName" className="block text-sm font-medium text-gray-700 mb-1">
-                  Last Name*
-                </label>
-                <input
-                  type="text"
-                  id="ecLastName"
-                  name="lastName"
-                  value={formData.emergencyContact.lastName}
-                  onChange={(e) => handleInputChange(e, 'emergencyContact')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-            </div>
-            
-            <div>
-              <label htmlFor="ecWhatsappNumber" className="block text-sm font-medium text-gray-700 mb-1">
-                WhatsApp Number*
-              </label>
-              <input
-                type="tel"
-                id="ecWhatsappNumber"
-                name="whatsappNumber"
-                value={formData.emergencyContact.whatsappNumber}
-                onChange={(e) => handleInputChange(e, 'emergencyContact')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                required
-                placeholder="e.g., 0244123456"
-              />
-            </div>
-            
-            <div>
-              <label htmlFor="ecResidenceAddress" className="block text-sm font-medium text-gray-700 mb-1">
-                Residence Address*
-              </label>
-              <input
-                type="text"
-                id="ecResidenceAddress"
-                name="residenceAddress"
-                value={formData.emergencyContact.residenceAddress}
-                onChange={(e) => handleInputChange(e, 'emergencyContact')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                required
-              />
-            </div>
-          </div>
-        );
-      
-      case 3:
-        return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Employment Information</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="employmentStatus" className="block text-sm font-medium text-gray-700 mb-1">
-                  Employment Status*
-                </label>
-                <select
-                  id="employmentStatus"
-                  name="status"
-                  value={formData.employmentInfo.status}
-                  onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                >
-                  <option value="full-time">Full-time</option>
-                  <option value="part-time">Part-time</option>
-                  <option value="contract">Contract</option>
-                  <option value="self-employed">Self-employed</option>
-                </select>
-              </div>
-              
-              <div>
-                <label htmlFor="employmentType" className="block text-sm font-medium text-gray-700 mb-1">
-                  Employment Type*
-                </label>
-                <select
-                  id="employmentType"
-                  name="type"
-                  value={formData.employmentInfo.type}
-                  onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                >
-                  <option value="">Select employment type</option>
-                  <option value="cagd_payroll">CAGD Payroll (e.g., Teachers)</option>
-                  <option value="non_cagd_payroll">Non-CAGD Payroll (e.g., Police)</option>
-                  <option value="private_sector">Private Sector</option>
-                  <option value="self_employed">Self-employed</option>
-                </select>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="monthlyIncome" className="block text-sm font-medium text-gray-700 mb-1">
-                  Monthly Income (GH₵)*
-                </label>
-                <input
-                  type="number"
-                  id="monthlyIncome"
-                  name="monthlyIncome"
-                  value={formData.employmentInfo.monthlyIncome || ''}
-                  onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                  min="1000"
-                />
-                {formData.employmentInfo.monthlyIncome > 0 && formData.employmentInfo.monthlyIncome < 1000 && (
-                  <p className="mt-1 text-sm text-red-600">Minimum monthly income is GH₵ 1,000</p>
-                )}
-              </div>
-              
-              <div>
-                <label htmlFor="employmentStartDate" className="block text-sm font-medium text-gray-700 mb-1">
-                  Employment Start Date*
-                </label>
-                <input
-                  type="date"
-                  id="employmentStartDate"
-                  name="employmentStartDate"
-                  value={formData.employmentInfo.employmentStartDate}
-                  onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-            </div>
-            
-            {formData.employmentInfo.status === 'contract' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <Card>
+            <form onSubmit={handleSubmit} className="space-y-6 p-6">
+              <div className="space-y-4">
+                <h2 className="text-xl font-semibold">Rental Details</h2>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label htmlFor="monthlyRent" className="block text-sm font-medium text-gray-700 mb-1">
+                      Monthly Rent Amount (GH₵)
+                    </label>
+                    <input
+                      type="number"
+                      id="monthlyRent"
+                      name="monthlyRent"
+                      value={formData.monthlyRent}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="paymentTerm" className="block text-sm font-medium text-gray-700 mb-1">
+                      Payment Term
+                    </label>
+                    <select
+                      id="paymentTerm"
+                      name="paymentTerm"
+                      value={formData.paymentTerm}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    >
+                      <option value="6">6 Months</option>
+                      <option value="12">12 Months</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label htmlFor="leaseStartDate" className="block text-sm font-medium text-gray-700 mb-1">
+                      Lease Start Date
+                    </label>
+                    <input
+                      type="date"
+                      id="leaseStartDate"
+                      name="leaseStartDate"
+                      value={formData.leaseStartDate}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="leaseEndDate" className="block text-sm font-medium text-gray-700 mb-1">
+                      Lease End Date
+                    </label>
+                    <input
+                      type="date"
+                      id="leaseEndDate"
+                      name="leaseEndDate"
+                      value={formData.leaseEndDate}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label htmlFor="contractEndDate" className="block text-sm font-medium text-gray-700 mb-1">
-                    Contract End Date*
+                  <label htmlFor="propertyAddress" className="block text-sm font-medium text-gray-700 mb-1">
+                    Property Address
+                  </label>
+                  <input
+                    type="text"
+                    id="propertyAddress"
+                    name="propertyAddress"
+                    value={formData.propertyAddress}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label htmlFor="landlordName" className="block text-sm font-medium text-gray-700 mb-1">
+                      Landlord Name
+                    </label>
+                    <input
+                      type="text"
+                      id="landlordName"
+                      name="landlordName"
+                      value={formData.landlordName}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="landlordPhone" className="block text-sm font-medium text-gray-700 mb-1">
+                      Landlord Phone
+                    </label>
+                    <input
+                      type="tel"
+                      id="landlordPhone"
+                      name="landlordPhone"
+                      value={formData.landlordPhone}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="landlordPaymentDate" className="block text-sm font-medium text-gray-700 mb-1">
+                    Landlord Payment Date
                   </label>
                   <input
                     type="date"
-                    id="contractEndDate"
-                    name="contractEndDate"
-                    value={formData.employmentInfo.contractEndDate}
-                    onChange={(e) => handleInputChange(e, 'employmentInfo')}
+                    id="landlordPaymentDate"
+                    name="landlordPaymentDate"
+                    value={formData.landlordPaymentDate}
+                    onChange={handleInputChange}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    required={formData.employmentInfo.status === 'contract'}
+                    required
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Date when ShelterCrest will pay your landlord
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-gray-200">
+                <h2 className="text-xl font-semibold">Emergency Contact</h2>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label htmlFor="emergencyFirstName" className="block text-sm font-medium text-gray-700 mb-1">
+                      First Name
+                    </label>
+                    <input
+                      type="text"
+                      id="emergencyFirstName"
+                      name="emergencyFirstName"
+                      value={formData.emergencyFirstName}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="emergencyLastName" className="block text-sm font-medium text-gray-700 mb-1">
+                      Last Name
+                    </label>
+                    <input
+                      type="text"
+                      id="emergencyLastName"
+                      name="emergencyLastName"
+                      value={formData.emergencyLastName}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label htmlFor="emergencyWhatsappNumber" className="block text-sm font-medium text-gray-700 mb-1">
+                    WhatsApp Number
+                  </label>
+                  <input
+                    type="tel"
+                    id="emergencyWhatsappNumber"
+                    name="emergencyWhatsappNumber"
+                    value={formData.emergencyWhatsappNumber}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="emergencyResidenceAddress" className="block text-sm font-medium text-gray-700 mb-1">
+                    Residence Address
+                  </label>
+                  <input
+                    type="text"
+                    id="emergencyResidenceAddress"
+                    name="emergencyResidenceAddress"
+                    value={formData.emergencyResidenceAddress}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-gray-200">
+                <h2 className="text-xl font-semibold">Employer Information</h2>
+                
+                <div>
+                  <label htmlFor="companyName" className="block text-sm font-medium text-gray-700 mb-1">
+                    Company Name
+                  </label>
+                  <input
+                    type="text"
+                    id="companyName"
+                    name="companyName"
+                    value={formData.companyName}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    required
+                  />
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label htmlFor="companyWebsite" className="block text-sm font-medium text-gray-700 mb-1">
+                      Company Website (Optional)
+                    </label>
+                    <input
+                      type="url"
+                      id="companyWebsite"
+                      name="companyWebsite"
+                      value={formData.companyWebsite}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="companyPhone" className="block text-sm font-medium text-gray-700 mb-1">
+                      Company Phone
+                    </label>
+                    <input
+                      type="tel"
+                      id="companyPhone"
+                      name="companyPhone"
+                      value={formData.companyPhone}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label htmlFor="companyLocation" className="block text-sm font-medium text-gray-700 mb-1">
+                    Company Location
+                  </label>
+                  <input
+                    type="text"
+                    id="companyLocation"
+                    name="companyLocation"
+                    value={formData.companyLocation}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="companyLocationGps" className="block text-sm font-medium text-gray-700 mb-1">
+                    Company Location GPS (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    id="companyLocationGps"
+                    name="companyLocationGps"
+                    value={formData.companyLocationGps}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label htmlFor="supervisorName" className="block text-sm font-medium text-gray-700 mb-1">
+                      Supervisor Name
+                    </label>
+                    <input
+                      type="text"
+                      id="supervisorName"
+                      name="supervisorName"
+                      value={formData.supervisorName}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="supervisorPhone" className="block text-sm font-medium text-gray-700 mb-1">
+                      Supervisor Phone
+                    </label>
+                    <input
+                      type="tel"
+                      id="supervisorPhone"
+                      name="supervisorPhone"
+                      value={formData.supervisorPhone}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-gray-200">
+                <h2 className="text-xl font-semibold">Employment Details</h2>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label htmlFor="employeeIdNumber" className="block text-sm font-medium text-gray-700 mb-1">
+                      Employee ID Number (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      id="employeeIdNumber"
+                      name="employeeIdNumber"
+                      value={formData.employeeIdNumber}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="contractEndDate" className="block text-sm font-medium text-gray-700 mb-1">
+                      Contract End Date (Optional)
+                    </label>
+                    <input
+                      type="date"
+                      id="contractEndDate"
+                      name="contractEndDate"
+                      value={formData.contractEndDate}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
                 </div>
                 
                 <div className="flex items-center">
@@ -895,478 +813,115 @@ const EnhancedApplicationForm = () => {
                     type="checkbox"
                     id="contractRenewable"
                     name="contractRenewable"
-                    checked={formData.employmentInfo.contractRenewable}
-                    onChange={(e) => handleInputChange(e, 'employmentInfo')}
+                    checked={formData.contractRenewable}
+                    onChange={handleInputChange}
                     className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
                   />
                   <label htmlFor="contractRenewable" className="ml-2 block text-sm text-gray-700">
                     Contract is renewable
                   </label>
                 </div>
-              </div>
-            )}
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="employeeIdNumber" className="block text-sm font-medium text-gray-700 mb-1">
-                  Employee ID Number
-                </label>
-                <input
-                  type="text"
-                  id="employeeIdNumber"
-                  name="employeeIdNumber"
-                  value={formData.employmentInfo.employeeIdNumber}
-                  onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-              
-              {(formData.employmentInfo.type === 'cagd_payroll' || formData.employmentInfo.type === 'non_cagd_payroll') && (
-                <div>
-                  <label htmlFor="mandateNumber" className="block text-sm font-medium text-gray-700 mb-1">
-                    Mandate Number
-                  </label>
-                  <input
-                    type="text"
-                    id="mandateNumber"
-                    name="mandateNumber"
-                    value={formData.employmentInfo.mandateNumber}
-                    onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label htmlFor="mandateNumber" className="block text-sm font-medium text-gray-700 mb-1">
+                      Mandate Number (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      id="mandateNumber"
+                      name="mandateNumber"
+                      value={formData.mandateNumber}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label htmlFor="mandatePin" className="block text-sm font-medium text-gray-700 mb-1">
+                      Mandate PIN (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      id="mandatePin"
+                      name="mandatePin"
+                      value={formData.mandatePin}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
                 </div>
-              )}
-            </div>
-            
-            {(formData.employmentInfo.type === 'cagd_payroll' || formData.employmentInfo.type === 'non_cagd_payroll') && (
-              <div>
-                <label htmlFor="mandatePin" className="block text-sm font-medium text-gray-700 mb-1">
-                  Mandate PIN
-                </label>
-                <input
-                  type="text"
-                  id="mandatePin"
-                  name="mandatePin"
-                  value={formData.employmentInfo.mandatePin}
-                  onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-            )}
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="hasOutstandingLoans"
-                  name="hasOutstandingLoans"
-                  checked={formData.employmentInfo.hasOutstandingLoans}
-                  onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                  className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                />
-                <label htmlFor="hasOutstandingLoans" className="ml-2 block text-sm text-gray-700">
-                  I have outstanding loans
-                </label>
-              </div>
-              
-              {formData.employmentInfo.hasOutstandingLoans && (
-                <div>
-                  <label htmlFor="loanRepaymentAmount" className="block text-sm font-medium text-gray-700 mb-1">
-                    Monthly Loan Repayment Amount (GH₵)
-                  </label>
+                
+                <div className="flex items-center">
                   <input
-                    type="number"
-                    id="loanRepaymentAmount"
-                    name="loanRepaymentAmount"
-                    value={formData.employmentInfo.loanRepaymentAmount || ''}
-                    onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    required={formData.employmentInfo.hasOutstandingLoans}
+                    type="checkbox"
+                    id="hasOutstandingLoans"
+                    name="hasOutstandingLoans"
+                    checked={formData.hasOutstandingLoans}
+                    onChange={handleInputChange}
+                    className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
                   />
-                </div>
-              )}
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="flex items-center">
-                <input
-                  type="checkbox"
-                  id="hasSavingsAccount"
-                  name="hasSavingsAccount"
-                  checked={formData.employmentInfo.hasSavingsAccount}
-                  onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                  className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
-                />
-                <label htmlFor="hasSavingsAccount" className="ml-2 block text-sm text-gray-700">
-                  I have a savings account
-                </label>
-              </div>
-              
-              {formData.employmentInfo.hasSavingsAccount && (
-                <div>
-                  <label htmlFor="savingsAmount" className="block text-sm font-medium text-gray-700 mb-1">
-                    Savings Amount (GH₵)
+                  <label htmlFor="hasOutstandingLoans" className="ml-2 block text-sm text-gray-700">
+                    I have outstanding loans
                   </label>
-                  <input
-                    type="number"
-                    id="savingsAmount"
-                    name="savingsAmount"
-                    value={formData.employmentInfo.savingsAmount || ''}
-                    onChange={(e) => handleInputChange(e, 'employmentInfo')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    required={formData.employmentInfo.hasSavingsAccount}
-                  />
                 </div>
-              )}
-            </div>
-            
-            <h3 className="text-lg font-semibold mt-6">Employer Information</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="companyName" className="block text-sm font-medium text-gray-700 mb-1">
-                  Company Name*
-                </label>
-                <input
-                  type="text"
-                  id="companyName"
-                  name="companyName"
-                  value={formData.employerInfo.companyName}
-                  onChange={(e) => handleInputChange(e, 'employerInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="companyWebsite" className="block text-sm font-medium text-gray-700 mb-1">
-                  Company Website
-                </label>
-                <input
-                  type="url"
-                  id="companyWebsite"
-                  name="companyWebsite"
-                  value={formData.employerInfo.companyWebsite}
-                  onChange={(e) => handleInputChange(e, 'employerInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="https://example.com"
-                />
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="companyLocation" className="block text-sm font-medium text-gray-700 mb-1">
-                  Company Location*
-                </label>
-                <input
-                  type="text"
-                  id="companyLocation"
-                  name="companyLocation"
-                  value={formData.employerInfo.companyLocation}
-                  onChange={(e) => handleInputChange(e, 'employerInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="companyLocationGps" className="block text-sm font-medium text-gray-700 mb-1">
-                  Company Location GPS
-                </label>
-                <input
-                  type="text"
-                  id="companyLocationGps"
-                  name="companyLocationGps"
-                  value={formData.employerInfo.companyLocationGps}
-                  onChange={(e) => handleInputChange(e, 'employerInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="e.g., GA-123-4567"
-                />
-              </div>
-            </div>
-            
-            <div>
-              <label htmlFor="companyPhone" className="block text-sm font-medium text-gray-700 mb-1">
-                Company Phone*
-              </label>
-              <input
-                type="tel"
-                id="companyPhone"
-                name="companyPhone"
-                value={formData.employerInfo.companyPhone}
-                onChange={(e) => handleInputChange(e, 'employerInfo')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                required
-                placeholder="e.g., 0302123456"
-              />
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="supervisorName" className="block text-sm font-medium text-gray-700 mb-1">
-                  Supervisor Name*
-                </label>
-                <input
-                  type="text"
-                  id="supervisorName"
-                  name="supervisorName"
-                  value={formData.employerInfo.supervisorName}
-                  onChange={(e) => handleInputChange(e, 'employerInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="supervisorPhone" className="block text-sm font-medium text-gray-700 mb-1">
-                  Supervisor Phone*
-                </label>
-                <input
-                  type="tel"
-                  id="supervisorPhone"
-                  name="supervisorPhone"
-                  value={formData.employerInfo.supervisorPhone}
-                  onChange={(e) => handleInputChange(e, 'employerInfo')}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                  placeholder="e.g., 0244123456"
-                />
-              </div>
-            </div>
-          </div>
-        );
-      
-      case 4:
-        return (
-          <div className="space-y-6">
-            <h2 className="text-xl font-semibold">Rental Information</h2>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="monthlyRent" className="block text-sm font-medium text-gray-700 mb-1">
-                  Monthly Rent Amount (GH₵)*
-                </label>
-                <input
-                  type="number"
-                  id="monthlyRent"
-                  name="monthlyRent"
-                  value={formData.monthlyRent || ''}
-                  onChange={(e) => setFormData(prev => ({
-                    ...prev,
-                    monthlyRent: parseFloat(e.target.value)
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                  min="250"
-                />
-                {formData.monthlyRent > 0 && formData.monthlyRent < 250 && (
-                  <p className="mt-1 text-sm text-red-600">Minimum monthly rent is GH₵ 250</p>
-                )}
-              </div>
-              
-              <div>
-                <label htmlFor="paymentTerm" className="block text-sm font-medium text-gray-700 mb-1">
-                  Payment Term*
-                </label>
-                <select
-                  id="paymentTerm"
-                  name="paymentTerm"
-                  value={formData.paymentTerm}
-                  onChange={(e) => setFormData(prev => ({
-                    ...prev,
-                    paymentTerm: e.target.value
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                >
-                  <option value="6">6 Months</option>
-                  <option value="12">12 Months</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="leaseStartDate" className="block text-sm font-medium text-gray-700 mb-1">
-                  Lease Start Date*
-                </label>
-                <input
-                  type="date"
-                  id="leaseStartDate"
-                  name="leaseStartDate"
-                  value={formData.leaseStartDate}
-                  onChange={(e) => setFormData(prev => ({
-                    ...prev,
-                    leaseStartDate: e.target.value
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="leaseEndDate" className="block text-sm font-medium text-gray-700 mb-1">
-                  Lease End Date*
-                </label>
-                <input
-                  type="date"
-                  id="leaseEndDate"
-                  name="leaseEndDate"
-                  value={formData.leaseEndDate}
-                  onChange={(e) => setFormData(prev => ({
-                    ...prev,
-                    leaseEndDate: e.target.value
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="propertyAddress" className="block text-sm font-medium text-gray-700 mb-1">
-                Property Address*
-              </label>
-              <input
-                type="text"
-                id="propertyAddress"
-                name="propertyAddress"
-                value={formData.propertyAddress}
-                onChange={(e) => setFormData(prev => ({
-                  ...prev,
-                  propertyAddress: e.target.value
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label htmlFor="landlordName" className="block text-sm font-medium text-gray-700 mb-1">
-                  Landlord Name*
-                </label>
-                <input
-                  type="text"
-                  id="landlordName"
-                  name="landlordName"
-                  value={formData.landlordName}
-                  onChange={(e) => setFormData(prev => ({
-                    ...prev,
-                    landlordName: e.target.value
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label htmlFor="landlordPhone" className="block text-sm font-medium text-gray-700 mb-1">
-                  Landlord Phone*
-                </label>
-                <input
-                  type="tel"
-                  id="landlordPhone"
-                  name="landlordPhone"
-                  value={formData.landlordPhone}
-                  onChange={(e) => setFormData(prev => ({
-                    ...prev,
-                    landlordPhone: e.target.value
-                  }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="landlordPaymentDate" className="block text-sm font-medium text-gray-700 mb-1">
-                Landlord Payment Date*
-              </label>
-              <input
-                type="date"
-                id="landlordPaymentDate"
-                name="landlordPaymentDate"
-                value={formData.landlordPaymentDate}
-                onChange={(e) => setFormData(prev => ({
-                  ...prev,
-                  landlordPaymentDate: e.target.value
-                }))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                required
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Date when ShelterCrest will pay your landlord
-              </p>
-            </div>
-          </div>
-        );
-      
-      default:
-        return null;
-    }
-  };
-
-  return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Rent Assistance Application</h1>
-      
-      {/* Progress Steps */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between">
-          {Array.from({ length: totalSteps }, (_, i) => (
-            <div key={i} className="flex items-center">
-              <div className={`flex items-center justify-center h-8 w-8 rounded-full border-2 
-                ${i + 1 <= currentStep 
-                  ? 'bg-primary-600 border-primary-600 text-white' 
-                  : 'border-gray-300 text-gray-300'}`}
-              >
-                {i + 1}
-              </div>
-              
-              {i < totalSteps - 1 && (
-                <div className={`w-12 sm:w-24 h-1 mx-2 
-                  ${i + 1 < currentStep ? 'bg-primary-600' : 'bg-gray-300'}`}
-                ></div>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="flex justify-between mt-2 text-xs text-gray-500">
-          <span>Personal Info</span>
-          <span>Emergency Contact</span>
-          <span>Employment</span>
-          <span>Rental Details</span>
-        </div>
-      </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <Card>
-            <form onSubmit={handleSubmit} className="space-y-6 p-6">
-              {renderStepContent()}
-              
-              <div className="flex justify-between mt-6">
-                {currentStep > 1 && (
-                  <Button 
-                    type="button" 
-                    variant="outline" 
-                    onClick={prevStep}
-                  >
-                    Previous
-                  </Button>
+                
+                {formData.hasOutstandingLoans && (
+                  <div>
+                    <label htmlFor="loanRepaymentAmount" className="block text-sm font-medium text-gray-700 mb-1">
+                      Monthly Loan Repayment Amount (GH₵)
+                    </label>
+                    <input
+                      type="number"
+                      id="loanRepaymentAmount"
+                      name="loanRepaymentAmount"
+                      value={formData.loanRepaymentAmount}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required={formData.hasOutstandingLoans}
+                    />
+                  </div>
                 )}
                 
-                <div className={`${currentStep > 1 ? 'ml-auto' : ''}`}>
-                  <Button 
-                    type="submit" 
-                    isLoading={loading}
-                  >
-                    {currentStep < totalSteps ? "Next" : "Submit Application"}
-                  </Button>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    id="hasSavingsAccount"
+                    name="hasSavingsAccount"
+                    checked={formData.hasSavingsAccount}
+                    onChange={handleInputChange}
+                    className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                  />
+                  <label htmlFor="hasSavingsAccount" className="ml-2 block text-sm text-gray-700">
+                    I have a savings account
+                  </label>
                 </div>
+                
+                {formData.hasSavingsAccount && (
+                  <div>
+                    <label htmlFor="savingsAmount" className="block text-sm font-medium text-gray-700 mb-1">
+                      Savings Amount (GH₵)
+                    </label>
+                    <input
+                      type="number"
+                      id="savingsAmount"
+                      name="savingsAmount"
+                      value={formData.savingsAmount}
+                      onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      required={formData.hasSavingsAccount}
+                    />
+                  </div>
+                )}
               </div>
+
+              <Button 
+                type="submit" 
+                className="w-full"
+                isLoading={loading}
+              >
+                {applications.length > 0 ? "Update Application" : "Submit Application"}
+              </Button>
             </form>
           </Card>
         </div>
@@ -1386,7 +941,6 @@ const EnhancedApplicationForm = () => {
                 proratedRent={proratedRent}
                 landlordPaymentDate={landlordPaymentDate}
                 paymentTerm={paymentTerm}
-                isInitialDocumentFee={true}
               />
             </div>
           </Card>

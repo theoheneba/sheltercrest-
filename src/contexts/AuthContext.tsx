@@ -103,6 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           if (profile) {
             console.log('Profile data fetched successfully:', profile);
+            console.log('Profile Role:', profile.role); // Log the role specifically
             
             // Set the user state with the profile data
             setUser({
@@ -183,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           if (profile) {
             console.log('Profile data fetched successfully after sign in:', profile);
+            console.log('Profile Role:', profile.role); // Log the role specifically
             
             // Set the user state with the profile data
             setUser({
@@ -230,6 +232,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           if (profile) {
             console.log('Profile data fetched successfully after user update:', profile);
+            console.log('Profile Role:', profile.role); // Log the role specifically
             
             // Set the user state with the profile data
             setUser({
@@ -289,6 +292,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         if (profile) {
           console.log('Complete profile data fetched after login:', profile);
+          console.log('Profile Role:', profile.role); // Log the role specifically
           
           // Update the user state with the complete profile data
           setUser({
